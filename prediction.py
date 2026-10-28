@@ -1,105 +1,105 @@
+
 import numpy as np
 import pandas as pd
+
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import mean_absolute_error, r2_score, root_mean_squared_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 # ==========================================
-# 1. GENERATE MOCK DATASET
-# (Replace this section by loading your real CSV)
+# 1. LOAD OR GENERATE DATASET
 # ==========================================
-# Example: df = pd.read_csv('your_housing_data.csv')
+
+# To use your real dataset, uncomment:
+# df = pd.read_csv("house_data.csv")
+
 np.random.seed(42)
 n_samples = 1000
 
-mock_data = {
-    "SquareFeet": np.random.randint(800, 4500, size=n_samples),
-    "Bedrooms": np.random.randint(1, 6, size=n_samples),
-    "Bathrooms": np.random.randint(1, 4, size=n_samples),
+df = pd.DataFrame({
+    "SquareFeet": np.random.randint(800, 4500, n_samples),
+    "Bedrooms": np.random.randint(1, 6, n_samples),
+    "Bathrooms": np.random.randint(1, 4, n_samples),
     "Neighborhood": np.random.choice(
-        ["Downtown", "Suburbs", "Rural"], size=n_samples
+        ["Downtown", "Suburbs", "Rural"], n_samples
     ),
-    "YearBuilt": np.random.randint(1950, 2025, size=n_samples),
-    # Missing values simulated in 'SquareFeet'
-    "Price": np.random.randint(150000, 800000, size=n_samples),
-}
-df = pd.DataFrame(mock_data)
-# Introduce random missing values for demo purposes
-df.loc[df.sample(frac=0.05).index, "SquareFeet"] = np.nan
+    "YearBuilt": np.random.randint(1950, 2025, n_samples),
+    "Price": np.random.randint(150000, 800000, n_samples)
+})
 
+# Add missing values
+df.loc[df.sample(frac=0.05, random_state=42).index, "SquareFeet"] = np.nan
+
+# Remove rows where the target price is missing
+df = df.dropna(subset=["Price"])
 
 # ==========================================
-# 2. SEPARATE FEATURES AND TARGET
+# 2. FEATURES AND TARGET
 # ==========================================
+
 X = df.drop(columns=["Price"])
 y = df["Price"]
 
-# Identify column types automatically
-numerical_cols = X.select_dtypes(include=["int64", "float64"]).columns.tolist()
-categorical_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
+numerical_cols = X.select_dtypes(include=np.number).columns.tolist()
+categorical_cols = X.select_dtypes(
+    include=["object", "category"]
+).columns.tolist()
 
-# Split into Training and Testing sets (80/20 split)
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
+    X,
+    y,
+    test_size=0.2,
+    random_state=42
 )
-
 
 # ==========================================
-# 3. PREPROCESSING & PIPELINE SETUP
+# 3. PREPROCESSING
 # ==========================================
-# Preprocessing for numerical features: impute missing values with median, then scale
-numerical_transformer = Pipeline(
-    steps=[
-        ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler()),
-    ]
-)
 
-# Preprocessing for categorical features: impute with most frequent, then one-hot encode
-categorical_transformer = Pipeline(
-    steps=[
-        ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("onehot", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
-    ]
-)
+numerical_transformer = Pipeline(steps=[
+    ("imputer", SimpleImputer(strategy="median")),
+    ("scaler", StandardScaler())
+])
 
-# Combine transformers into a single preprocessor
-preprocessor = ColumnTransformer(
-    transformers=[
-        ("num", numerical_transformer, numerical_cols),
-        ("cat", categorical_transformer, categorical_cols),
-    ]
-)
+categorical_transformer = Pipeline(steps=[
+    ("imputer", SimpleImputer(strategy="most_frequent")),
+    ("onehot", OneHotEncoder(handle_unknown="ignore"))
+])
 
-# Create the full modeling pipeline containing preprocessing and the regressor
-model_pipeline = Pipeline(
-    steps=[
-        ("preprocessor", preprocessor),
-        (
-            "regressor",
-            RandomForestRegressor(n_estimators=100, random_state=42),
-        ),
-    ]
-)
-
+preprocessor = ColumnTransformer(transformers=[
+    ("num", numerical_transformer, numerical_cols),
+    ("cat", categorical_transformer, categorical_cols)
+])
 
 # ==========================================
-# 4. TRAINING & EVALUATION
+# 4. BUILD AND TRAIN MODEL
 # ==========================================
-# Train the model
-print("Training the Random Forest model...")
-model_pipeline.fit(X_train, y_train)
 
-# Make predictions on test data
-predictions = model_pipeline.predict(X_test)
+model = Pipeline(steps=[
+    ("preprocessor", preprocessor),
+    ("regressor", RandomForestRegressor(
+        n_estimators=150,
+        max_depth=15,
+        random_state=42,
+        n_jobs=-1
+    ))
+])
 
-# Calculate Evaluation Metrics
+print("Training house price prediction model...")
+model.fit(X_train, y_train)
+
+# ==========================================
+# 5. MODEL EVALUATION
+# ==========================================
+
+predictions = model.predict(X_test)
+
 mae = mean_absolute_error(y_test, predictions)
-rmse = root_mean_squared_error(y_test, predictions)
+rmse = np.sqrt(mean_squared_error(y_test, predictions))
 r2 = r2_score(y_test, predictions)
 
 print("\n--- Model Evaluation Results ---")
@@ -107,21 +107,20 @@ print(f"Mean Absolute Error (MAE): ${mae:,.2f}")
 print(f"Root Mean Squared Error (RMSE): ${rmse:,.2f}")
 print(f"R-squared (R2) Score: {r2:.4f}")
 
-
 # ==========================================
-# 5. PREDICTING ON NEW DATA
+# 6. PREDICT PRICE FOR A NEW HOUSE
 # ==========================================
-new_house = pd.DataFrame(
-    [
-        {
-            "SquareFeet": 2500,
-            "Bedrooms": 3,
-            "Bathrooms": 2,
-            "Neighborhood": "Suburbs",
-            "YearBuilt": 2015,
-        }
-    ]
-)
 
-predicted_price = model_pipeline.predict(new_house)[0]
-print(f"\nPredicted price for the new house layout: ${predicted_price:,.2f}")
+new_house = pd.DataFrame([{
+    "SquareFeet": 2500,
+    "Bedrooms": 3,
+    "Bathrooms": 2,
+    "Neighborhood": "Suburbs",
+    "YearBuilt": 2015
+}])
+
+predicted_price = model.predict(new_house)[0]
+
+print("\n--- New House Prediction ---")
+print(f"Predicted house price: ${predicted_price:,.2f}")
+
